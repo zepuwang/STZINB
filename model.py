@@ -410,7 +410,9 @@ class ST_NB_ZeroInflated(nn.Module):
         self.temporal_factors = X_t2
         X_t3 = self.TC3(X_t2)
         _b,_h,_ht = X_t3.shape
+       
         n_t_nb,p_t_nb,pi_t_nb = self.TNB(X_t3.view(_b,_h,_ht,1))
+        
 
         X_s1 = self.SC1(X, A_q, A_h)
         X_s2 = self.SC2(X_s1, A_q, A_h) #num_nodes, rank
@@ -418,9 +420,145 @@ class ST_NB_ZeroInflated(nn.Module):
         X_s3 = self.SC3(X_s2, A_q, A_h)
         _b,_n,_hs = X_s3.shape
         n_s_nb,p_s_nb,pi_s_nb = self.SNB(X_s3.view(_b,_n,_hs,1))
+        
+        
         n_res = n_t_nb.permute(0, 2, 1) * n_s_nb
         p_res = p_t_nb.permute(0, 2, 1) * p_s_nb
         pi_res = pi_t_nb.permute(0, 2, 1) * pi_s_nb
 
+       
+
         return n_res,p_res,pi_res
 
+class MDN(nn.Module):
+    def __init__(self, c_in, c_out,n_gussian):
+        super(MDN,self).__init__()
+        self.c_in = c_in
+        self.c_out = c_out
+        
+        self.pi_conv = nn.Conv2d(in_channels=c_in,
+                                    out_channels=c_out,
+                                    kernel_size=(1,1),
+                                    bias=True)
+        
+        self.pi = nn.Conv2d(in_channels=c_in,
+                                    out_channels=c_out,
+                                    kernel_size=(1,1),
+                                    bias=True)
+        
+        self.mu = nn.Conv2d(in_channels=c_in,
+                                    out_channels=c_out,
+                                    kernel_size=(1,1),
+                                    bias=True)
+        
+        self.sigma = nn.Conv2d(in_channels=c_in,
+                                    out_channels=c_out,
+                                    kernel_size=(1,1),
+                                    bias=True)
+
+        
+                                    
+        self.out_dim = c_out # output horizon
+       
+        self.linear_mu_g = nn.Linear(1,n_gussian)
+        self.linear_pi_g = nn.Linear(1,n_gussian)
+        self.linear_sigma_g = nn.Linear(1,n_gussian)
+
+        self.n = n_gussian
+    def forward(self,x):
+        x = x.permute(0,2,1,3)
+ 
+        (B, _, N,_) = x.shape # B: batch_size; N: input nodes
+        pi = self.pi_conv(x)
+        pi_g  = self.pi(x)
+        mu_g  = self.mu(x)
+        sigma_g = self.sigma(x)
+        
+        pi_g = self.linear_pi_g(pi_g)
+        mu_g = self.linear_pi_g(mu_g)
+        sigma_g = self.linear_pi_g(sigma_g)
+        
+        # Reshape
+
+        pi = pi.view([B,self.out_dim,N])
+        pi_g = pi_g.view([B,self.out_dim,N,self.n])
+        mu_g = mu_g.view([B,self.out_dim,N,self.n])
+        sigma_g = sigma_g.view([B,self.out_dim,N,self.n])
+        
+        # Ensure n is positive and p between 0 and 1
+        #n = F.softplus(n) # Some parameters can be tuned here
+        #p = F.sigmoid(p)
+        #pi = F.sigmoid(pi)
+
+        pi = pi.permute([0,2,1])
+        sigma_g = sigma_g.permute([0,2,1,3])
+        pi_g = pi_g.permute([0,2,1,3])
+        mu_g = mu_g.permute([0,2,1,3])
+        #pi  = F.sigmoid(pi)
+        sigma_g = torch.exp(sigma_g)
+        #pi_g =  F.softmax(pi_g,-1)
+        mu_g = mu_g
+
+        return pi, pi_g,mu_g,sigma_g
+    
+
+
+class ST_MDN(nn.Module):
+    """
+  wx_t  + wx_s
+    |       |
+   TC4     SC4
+    |       |
+   TC3     SC3
+    |       |
+   z_t     z_s
+    |       |
+   TC2     SC2
+    |       |  
+   TC1     SC1
+    |       |
+   x_m     x_m
+    """
+    def __init__(self, SC1, SC2, SC3, TC1, TC2, TC3, SMDN,TMDN): 
+        super(ST_MDN, self).__init__()
+        self.TC1 = TC1
+        self.TC2 = TC2
+        self.TC3 = TC3
+        self.TNB = TMDN
+
+        self.SC1 = SC1
+        self.SC2 = SC2
+        self.SC3 = SC3
+        self.SNB = SMDN
+
+    def forward(self, X, A_q, A_h):
+        """
+        :param X: Input data of shape (batch_size, num_timesteps, num_nodes)
+        :A_hat: The Laplacian matrix (num_nodes, num_nodes)
+        :return: Reconstructed X of shape (batch_size, num_timesteps, num_nodes)
+        """  
+        X = X[:,:,:,0]#.to(device='cuda') # Dummy dimension deleted
+        X_T = X.permute(0,2,1)
+        X_t1 = self.TC1(X_T)
+        X_t2 = self.TC2(X_t1) #num_time, rank
+        self.temporal_factors = X_t2
+        X_t3 = self.TC3(X_t2)
+        _b,_h,_ht = X_t3.shape
+        pi_t, pi_g_t,mu_g_t,sigma_g_t = self.TNB(X_t3.view(_b,_h,_ht,1))
+        
+        X_s1 = self.SC1(X, A_q, A_h)
+        X_s2 = self.SC2(X_s1, A_q, A_h) #num_nodes, rank
+        self.space_factors = X_s2
+        X_s3 = self.SC3(X_s2, A_q, A_h)
+        _b,_n,_hs = X_s3.shape
+        pi_s, pi_g_s,mu_g_s,sigma_g_s = self.SNB(X_s3.view(_b,_n,_hs,1))
+   
+        pi_res = pi_t.permute(0, 2, 1) * pi_s
+        pi_g_res = pi_g_t.permute(0, 2, 1, 3) * pi_g_s
+        mu_g_res = mu_g_t.permute(0, 2, 1, 3) * mu_g_s
+        sigma_g_s = sigma_g_t.permute(0, 2, 1, 3) * sigma_g_s
+        
+        pi_res = F.sigmoid(pi_res)
+        pi_g_res = F.softmax(pi_g_res,-1)
+        
+        return pi_res,pi_g_res,mu_g_res,sigma_g_s

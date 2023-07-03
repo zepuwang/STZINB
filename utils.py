@@ -380,6 +380,85 @@ def nb_zeroinflated_nll_loss(y,n,p,pi,y_mask=None):
     #print('nll',torch.mean(L_yeq0),torch.mean(L_yg0),torch.mean(torch.log(pi_yeq0)),torch.mean(torch.log(pi_yg0)))
     return -torch.sum(L_yeq0)-torch.sum(L_yg0)
 
+
+def entropy_loss(y,pi):
+    y_processed = torch.where(y != 0, torch.tensor(1), y)
+    criterion = nn.BCELoss()
+    loss = criterion(pi, y_processed).mean()
+    return loss
+
+import torch
+
+
+def mdn_loss_fn(y, mu, sigma, pi):
+    
+    y += 1e-8
+
+    y = torch.log(y)
+    
+    # Reshape y to match the shape of mu and sigma
+    y = y.unsqueeze(-1).expand_as(mu)
+    
+    # Calculate the probability density function (PDF)
+    sigma = sigma + 1e-8
+    
+    m = torch.distributions.Normal(loc=mu, scale=sigma)
+    pdf = torch.exp(m.log_prob(y))
+    
+    # Calculate the weighted PDF and sum across mixture components
+
+    
+    weighted_pdf = pdf * pi# * pi_yg0.unsqueeze(-1)
+    #print(weighted_pdf[:,:10,:,:])
+    sum_weighted_pdf = torch.sum(weighted_pdf, dim=-1)
+
+    sum_weighted_pdf += 1e-8
+    
+    # Calculate the negative log-likelihood loss
+    loss = -torch.log(sum_weighted_pdf)
+    
+    # Return the mean loss across the batch
+    return torch.mean(loss)
+
+
+def MDN_nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None):
+    """
+    y: true values
+    y_mask: whether missing mask is given
+    https://stats.idre.ucla.edu/r/dae/zinb/
+    """
+    idx_yeq0 = y==0
+    idx_yg0  = y>0
+    #pi_yq0 = pi[idx_yg0]
+    pi_g_yg0 = idx_yg0.unsqueeze(-1) * pi_g 
+    mu_g_yg0 = mu_g * idx_yg0.unsqueeze(-1)
+    sigma_yg0 = sigma_g * idx_yg0.unsqueeze(-1)
+
+
+    sigma_g[sigma_g<0]=0
+    
+    loss = mdn_loss_fn(y,mu_g_yg0,sigma_yg0, pi_g_yg0)
+
+    return loss
+
+def nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None):
+    idx_yeq0 = y==0
+    idx_yg0  = y>0
+    L1 = pi * idx_yeq0
+    L2 = (1-pi) * idx_yg0
+
+    L1[L1==0]=1e-8
+    L2[L2==0]=1e-8
+
+    L1 = torch.log(L1)
+    L2 = torch.log(L2)
+    L = -L1-L2
+    return torch.mean(L)
+
+def nb_MDN_nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None):
+    return  nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None) + MDN_nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None)
+
+
 def nb_zeroinflated_draw(n,p,pi):
     """
     input: n, p, pi tensors
@@ -458,3 +537,32 @@ def gauss_loss(y,loc,scale,y_mask=None):
     torch.pi = torch.acos(torch.zeros(1)).item() * 2 # ugly define pi value in torch format
     LL = -1/2 * torch.log(2*torch.pi*torch.pow(scale,2)) - 1/2*( torch.pow(y-loc,2)/torch.pow(scale,2) )
     return -torch.sum(LL)
+
+
+def zero_inflated_mdn_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None):
+    idx_yeq0 = y==0
+    idx_yg0  = y>0
+
+    pi_yeq0 = pi * idx_yeq0
+    pi_yg0 = (1-pi) * idx_yg0
+
+    pi_g_yg0 = idx_yg0.unsqueeze(-1) * pi_g 
+    mu_g_yg0 = mu_g * idx_yg0.unsqueeze(-1)
+    sigma_yg0 = sigma_g * idx_yg0.unsqueeze(-1)
+
+    sigma_g[sigma_g<0]=0
+
+    L_yeq0 = torch.log(pi_yeq0)
+    L_yg0 = -torch.log(pi_yg0) #+ mdn_loss_fn(y,mu_g_yg0,sigma_yg0, pi_g_yg0,pi_yg0)
+
+    return -torch.sum(L_yeq0)+torch.sum(L_yg0)
+
+
+    
+
+
+
+
+
+
+
