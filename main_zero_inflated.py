@@ -20,6 +20,8 @@ os.environ["CUDA_VISIBLE_DEVICES"]='2'
 # Parameters
 torch.manual_seed(0)
 device = 'cpu'
+''
+
 #torch.device('cuda') 
 A = np.load('/Users/pipipu/Desktop/STZINB/ny_data_full_5min/adj_rand0.npy') # change the loading folder
 X = np.load('/Users/pipipu/Desktop/STZINB/ny_data_full_5min/cta_samp_rand0.npy')
@@ -35,7 +37,7 @@ rank_s = 20
 rank_t = 4
 n_gaussian = 2
 
-epochs = 50 #500
+epochs = 500 #500
 
 # Initial networks
 TCN1 = B_TCN(space_dim, hidden_dim_t, kernel_size=3).to(device=device)
