@@ -368,7 +368,7 @@ class ST_Gau(nn.Module):
         scale_res = scale_t.permute(0, 2, 1) * scale_s
                
         return loc_res,scale_res
-
+''
 class ST_NB_ZeroInflated(nn.Module):
     """
   wx_t  + wx_s
