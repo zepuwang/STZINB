@@ -114,6 +114,7 @@ with torch.no_grad():
         #pi_test_all[i:i+batch_size] = pi_test
         test_loss_all.append(test_loss)
     # The error of each horizon
+    ''
     mae_list = []
     rmse_list=[]
     mape_list=[]

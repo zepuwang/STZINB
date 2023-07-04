@@ -395,7 +395,7 @@ def mdn_loss_fn(y, mu, sigma, pi):
     y += 1e-8
 
     y = torch.log(y)
-    
+
     # Reshape y to match the shape of mu and sigma
     y = y.unsqueeze(-1).expand_as(mu)
     
@@ -419,7 +419,7 @@ def mdn_loss_fn(y, mu, sigma, pi):
     
     # Return the mean loss across the batch
     return torch.mean(loss)
-
+''
 
 def MDN_nll_loss(y,pi,pi_g,mu_g,sigma_g,y_mask=None):
     """
