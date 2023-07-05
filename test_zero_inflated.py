@@ -16,17 +16,40 @@ import tqdm
 from scipy.stats import nbinom
 import pickle as pk
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='2'
-torch.manual_seed(0)
-device = torch.device('cpu') 
+import argparse
+
+
 num_timesteps_output = 4 
 num_timesteps_input = num_timesteps_output
 
-best_model = 'pth/STZINB_ny_full_5min.pth' #place it with other models
-STmodel = torch.load(best_model).to(device=device)
+parser = argparse.ArgumentParser(description='STGCN')
+parser.add_argument('--enable-cuda', action='store_true',
+                    help='Enable CUDA')
+parser.add_argument('--data-dir', type=str,
+                    default='./ny_data_full_5min',
+                    help='Directory to save the best model')
+parser.add_argument('--best-model', type=str,
+                    default='pth/origin_1.pth',
+                    help='Directory to load the trained model')
+parser.add_argument('--output-dir', type=str,
+                    default='output/metr.npz',
+                    help='Directory to save the outputs')
+parser.add_argument('--seed', type=int,
+                    default=0)
+args = parser.parse_args()
+args.device = None
+if args.enable_cuda and torch.cuda.is_available():
+    args.device = torch.device('cuda')
+else:
+    args.device = torch.device('cpu')
+device = args.device
+torch.manual_seed(args.seed)
+
+best_model = args.best_model #place it with other models
+# STmodel = torch.load(best_model).to(device=device)
 # Load dataset
-A = np.load('ny_data_full_5min/adj_rand0.npy')
-X = np.load('ny_data_full_5min/cta_samp_rand0.npy')
+A = np.load(args.data_dir + '/adj_rand0.npy') # change the loading folder
+X = np.load(args.data_dir + '/cta_samp_rand0.npy')
 
 space_dim = X.shape[1]
 batch_size = 4
@@ -102,7 +125,7 @@ with torch.no_grad():
         pi_test,pi_g_test,mu_g_test,sigma_g_test = STmodel(x_batch,A_q,A_h)
 
         test_loss   = nb_MDN_nll_loss(test_target[i:i+batch_size],pi_test,pi_g_test,mu_g_test,sigma_g_test).to(device="cpu")
-        test_loss = np.asscalar(test_loss.detach().numpy())
+        test_loss = test_loss.detach().numpy()
         
         mean_pred = torch.abs(1-pi_test) *  torch.sum((pi_g_test * torch.exp(mu_g_test)),dim = -1)
 
@@ -129,4 +152,4 @@ with torch.no_grad():
         mape_list.append(mape)
         print('Horizon %d MAE:%.4f RMSE:%.4f MAPE:%.4f'%(horizon,mae,rmse,mape))
     print('BestModel %s overall score: NLL %.5f; mae %.4f; rmse %.4f; mape %.4f'%(best_model,test_loss,np.mean(mae_list),np.mean(rmse_list),np.mean(mape_list)))
-np.savez_compressed('output/ny_full_5min_ZISTNB',target=test_target.detach().cpu().numpy(),max_value=max_value,mean_pred=test_pred_all)
+np.savez_compressed(args.output_dir,target=test_target.detach().cpu().numpy(),max_value=max_value,mean_pred=test_pred_all)

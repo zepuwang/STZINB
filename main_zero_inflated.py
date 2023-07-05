@@ -16,15 +16,44 @@ import tqdm
 from scipy.stats import nbinom
 import pickle as pk
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='2'
+import argparse
+import logging
 # Parameters
-torch.manual_seed(0)
-device = 'cpu'
-''
+
+parser = argparse.ArgumentParser(description='STGCN')
+parser.add_argument('--enable-cuda', action='store_true',
+                    help='Enable CUDA')
+parser.add_argument('--data-dir', type=str,
+                    default='./ny_data_full_5min',
+                    help='Directory to save the best model')
+parser.add_argument('--save-name', type=str,
+                    default='pth/model.pth')
+parser.add_argument('--seed', type=int,
+                    default=0)
+parser.add_argument('--log-dir', type=str,
+                    default='log/origin.txt')
+args = parser.parse_args()
+args.device = None
+if args.enable_cuda and torch.cuda.is_available():
+    args.device = torch.device('cuda')
+else:
+    args.device = torch.device('cpu')
+device = args.device
+torch.manual_seed(args.seed)
+
+# Set loggers
+logger = logging.getLogger('Model training')
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler(args.log_dir,'w')
+handler.setLevel(logging.INFO)
+
+formatter = logging.Formatter('%(asctime)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 #torch.device('cuda') 
-A = np.load('/Users/pipipu/Desktop/STZINB/ny_data_full_5min/adj_rand0.npy') # change the loading folder
-X = np.load('/Users/pipipu/Desktop/STZINB/ny_data_full_5min/cta_samp_rand0.npy')
+A = np.load(args.data_dir + '/adj_rand0.npy') # change the loading folder
+X = np.load(args.data_dir + '/cta_samp_rand0.npy')
 
 num_timesteps_output = 4 
 num_timesteps_input = num_timesteps_output
@@ -122,51 +151,54 @@ for epoch in range(epochs):
         #n_train,p_train,pi_train = STmodel(X_batch,A_q,A_h)
 
 
-        loss = nb_MDN_nll_loss(y_batch,pi_train, pi_g_train,mu_g_train,sigma_g_train)
-        
+        loss = nb_MDN_nll_loss(y_batch,pi_train, pi_g_train,mu_g_train,sigma_g_train)        
         #loss = nb_zeroinflated_nll_loss(y_batch,n_train,p_train,pi_train)
         loss.backward()
         optimizer.step()
         epoch_training_losses.append(loss.detach().cpu().numpy())
+        
     training_nll.append(sum(epoch_training_losses)/len(epoch_training_losses))
-    print(sum(epoch_training_losses)/len(epoch_training_losses))
+    # print(sum(epoch_training_losses)/len(epoch_training_losses))
 
 
 
     ## Step 2, validation
     
-    with torch.no_grad():
-        STmodel.eval()
-        val_input = val_input.to(device=device)
-        val_target = val_target.to(device=device)
+    # with torch.no_grad():
+    #     STmodel.eval()
+    #     val_input = val_input.to(device=device)
+    #     val_target = val_target.to(device=device)
 
-        pi_val,pi_g_val,mu_g_val,sigma_g_val = STmodel(val_input,A_q,A_h)
-        #n_val,p_val,pi_val = STmodel(val_input,A_q,A_h)
-        #print('Pi_val,mean,min,max',torch.mean(pi_val),torch.min(pi_val),torch.max(pi_val))
+    #     pi_val,pi_g_val,mu_g_val,sigma_g_val = STmodel(val_input,A_q,A_h)
+    #     #n_val,p_val,pi_val = STmodel(val_input,A_q,A_h)
+    #     #print('Pi_val,mean,min,max',torch.mean(pi_val),torch.min(pi_val),torch.max(pi_val))
 
-        val_loss = nb_MDN_nll_loss(val_target,pi_val, pi_g_val,mu_g_val,sigma_g_val)
-        #val_loss    = nb_zeroinflated_nll_loss(val_target,n_val,p_val,pi_val).to(device="cpu")
-        validation_nll.append(np.asscalar(val_loss.detach().numpy()))
+    #     val_loss = nb_MDN_nll_loss(val_target,pi_val, pi_g_val,mu_g_val,sigma_g_val)
+    #     #val_loss    = nb_zeroinflated_nll_loss(val_target,n_val,p_val,pi_val).to(device="cpu")
+    #     validation_nll.append(np.asscalar(val_loss.detach().numpy()))
        
-        # Calculate the expectation value
+    #     # Calculate the expectation value
 
-        val_pred = torch.abs(1-pi_val) *  torch.sum((pi_g_val * torch.exp(mu_g_val)),dim = -1)
-        #print(mu_g_val[:,:,:,0])
+    #     val_pred = torch.abs(1-pi_val) *  torch.sum((pi_g_val * torch.exp(mu_g_val)),dim = -1)
+    #     #print(mu_g_val[:,:,:,0])
        
-        #print(print_errors(val_target.detach().cpu().numpy(),val_pred.detach().cpu().numpy()))
-        #val_pred = (1-pi_val.detach().cpu().numpy())*(n_val.detach().cpu().numpy()/p_val.detach().cpu().numpy()-n_val.detach().cpu().numpy()) # pipred
-        #print(val_pred.mean(),pi_val.detach().cpu().numpy().min())
-        mae = torch.mean(torch.abs(val_pred - val_target.detach().cpu().numpy()))
-        #print(mae)
-        validation_mae.append(mae)
-        pi_val,pi_g_val,mu_g_val,sigma_g_val = None, None, None, None
+    #     #print(print_errors(val_target.detach().cpu().numpy(),val_pred.detach().cpu().numpy()))
+    #     #val_pred = (1-pi_val.detach().cpu().numpy())*(n_val.detach().cpu().numpy()/p_val.detach().cpu().numpy()-n_val.detach().cpu().numpy()) # pipred
+    #     #print(val_pred.mean(),pi_val.detach().cpu().numpy().min())
+    #     mae = torch.mean(torch.abs(val_pred - val_target.detach().cpu().numpy()))
+    #     #print(mae)
+    #     validation_mae.append(mae)
+    #     pi_val,pi_g_val,mu_g_val,sigma_g_val = None, None, None, None
 
-        val_input = val_input.to(device="cpu")
-        val_target = val_target.to(device="cpu")
-    print('Epoch: {}'.format(epoch))
-    print("Training loss: {}".format(training_nll[-1]))
-    print('Epoch %d: trainNLL %.5f; valNLL %.5f; mae %.4f'%(epoch,training_nll[-1],validation_nll[-1],validation_mae[-1]))
-    if np.asscalar(training_nll[-1]) == min(training_nll):
+    #     val_input = val_input.to(device="cpu")
+    #     val_target = val_target.to(device="cpu")
+    logger.info("Epoch: {}, training loss: {}".format(epoch,training_nll[-1]))
+    handler.flush()
+    
+    # print('Epoch: {}'.format(epoch))
+    # print("Training loss: {}".format(training_nll[-1]))
+    # print('Epoch %d: trainNLL %.5f; valNLL %.5f; mae %.4f'%(epoch,training_nll[-1],validation_nll[-1],validation_mae[-1]))
+    if training_nll[-1] == min(training_nll):
         best_model = copy.deepcopy(STmodel.state_dict())
     checkpoint_path = "checkpoints/"
     if not os.path.exists(checkpoint_path):
@@ -176,4 +208,4 @@ for epoch in range(epochs):
     if np.isnan(training_nll[-1]):
         break
 STmodel.load_state_dict(best_model)
-torch.save(STmodel,'pth/STZINB_ny_full_5min.pth')
+torch.save(STmodel,args.save_name)
